@@ -1,0 +1,43 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Items are publicly readable (so anyone can browse listings),
+    // but can only be created/edited/deleted by their owner.
+    match /items/{itemId} {
+      allow read: if true;
+      allow create: if request.auth != null
+                    && request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if request.auth != null
+                    && resource.data.ownerId == request.auth.uid;
+    }
+
+    // Bookings: only the borrower can create one (as themselves).
+    // Once created, either the borrower or the item's owner can read/update it
+    // (both need to confirm handover/return via the QR/BankID flow).
+    match /bookings/{bookingId} {
+      allow create: if request.auth != null
+                    && request.resource.data.borrowerId == request.auth.uid;
+      allow read, update: if request.auth != null
+                    && (request.auth.uid == resource.data.borrowerId
+                        || request.auth.uid == resource.data.ownerId);
+    }
+
+    // Conversations: only the two participants can read/write the thread,
+    // and only messages sent by yourself can be created.
+    match /conversations/{conversationId} {
+      allow create: if request.auth != null
+                    && request.auth.uid in request.resource.data.participants;
+      allow read, update: if request.auth != null
+                    && request.auth.uid in resource.data.participants;
+
+      match /messages/{messageId} {
+        allow read: if request.auth != null
+                    && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
+        allow create: if request.auth != null
+                    && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants
+                    && request.resource.data.senderId == request.auth.uid;
+      }
+    }
+  }
+}
